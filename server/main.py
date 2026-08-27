@@ -1,8 +1,9 @@
+from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 from pydantic import BaseModel
-from mock_data import inventory_items, orders, demand_forecasts, backlog_items, spending_summary, monthly_spending, category_spending, recent_transactions, purchase_orders
+from mock_data import inventory_items, orders, demand_forecasts, backlog_items, spending_summary, monthly_spending, category_spending, recent_transactions, purchase_orders, restocking_orders
 
 app = FastAPI(title="Factory Inventory Management System")
 
@@ -119,6 +120,111 @@ class CreatePurchaseOrderRequest(BaseModel):
     unit_cost: float
     expected_delivery_date: str
     notes: Optional[str] = None
+
+class RestockingRecommendation(BaseModel):
+    sku: str
+    name: str
+    category: str
+    warehouse: str
+    quantity_on_hand: int
+    reorder_point: int
+    shortage: int
+    unit_cost: float
+    trend: str
+    forecasted_demand: int
+    recommended_quantity: int
+    line_total: float
+
+class RestockingOrderItem(BaseModel):
+    sku: str
+    name: str
+    warehouse: str
+    quantity: int
+    unit_cost: float
+    line_total: float
+
+class RestockingOrder(BaseModel):
+    id: str
+    order_date: str
+    budget: float
+    items: List[RestockingOrderItem]
+    total_cost: float
+    lead_time_days: int
+    expected_delivery: str
+    status: str
+
+class CreateRestockingOrderRequest(BaseModel):
+    budget: float
+
+# Restocking recommendation logic
+RESTOCKING_LEAD_TIME_DAYS = 7
+DEMAND_TREND_WEIGHT = {
+    'increasing': 2.0,
+    'stable': 1.0,
+    'decreasing': 0.5
+}
+
+def compute_restocking_recommendations(budget: float) -> list:
+    """Recommend items to restock within a budget.
+
+    Prioritizes items already below their reorder point, weighted by demand
+    trend (increasing-demand shortages first), then greedily fills the
+    budget in that priority order so cheaper lower-priority items can still
+    be included with whatever budget is left over.
+    """
+    if budget <= 0:
+        return []
+
+    demand_by_sku = {d['item_sku']: d for d in demand_forecasts}
+
+    candidates = []
+    for item in inventory_items:
+        shortage = item['reorder_point'] - item['quantity_on_hand']
+        if shortage <= 0:
+            continue
+
+        forecast = demand_by_sku.get(item['sku'])
+        trend = forecast['trend'].lower() if forecast else 'stable'
+        forecasted_demand = forecast['forecasted_demand'] if forecast else 0
+        priority_score = shortage * DEMAND_TREND_WEIGHT.get(trend, 1.0)
+
+        candidates.append({
+            'sku': item['sku'],
+            'name': item['name'],
+            'category': item['category'],
+            'warehouse': item['warehouse'],
+            'quantity_on_hand': item['quantity_on_hand'],
+            'reorder_point': item['reorder_point'],
+            'shortage': shortage,
+            'unit_cost': item['unit_cost'],
+            'trend': trend,
+            'forecasted_demand': forecasted_demand,
+            'priority_score': priority_score
+        })
+
+    # Highest priority first; ties broken by higher forecasted demand
+    candidates.sort(key=lambda c: (c['priority_score'], c['forecasted_demand']), reverse=True)
+
+    remaining_budget = budget
+    recommendations = []
+    for candidate in candidates:
+        if remaining_budget < candidate['unit_cost']:
+            continue
+
+        affordable_units = int(remaining_budget // candidate['unit_cost'])
+        recommended_quantity = min(candidate['shortage'], affordable_units)
+        if recommended_quantity <= 0:
+            continue
+
+        line_total = round(recommended_quantity * candidate['unit_cost'], 2)
+        remaining_budget = round(remaining_budget - line_total, 2)
+
+        recommendation = {k: v for k, v in candidate.items() if k != 'priority_score'}
+        recommendation['recommended_quantity'] = recommended_quantity
+        recommendation['line_total'] = line_total
+        recommendations.append(recommendation)
+
+    return recommendations
 
 # API endpoints
 @app.get("/")
@@ -303,6 +409,51 @@ def get_monthly_trends():
     result = list(months.values())
     result.sort(key=lambda x: x['month'])
     return result
+
+@app.get("/api/restocking/recommendations", response_model=List[RestockingRecommendation])
+def get_restocking_recommendations(budget: float = 0):
+    """Recommend items to restock within a budget, prioritizing existing shortages weighted by demand trend"""
+    return compute_restocking_recommendations(budget)
+
+@app.get("/api/restocking/orders", response_model=List[RestockingOrder])
+def get_restocking_orders():
+    """Get all submitted restocking orders"""
+    return restocking_orders
+
+@app.post("/api/restocking/orders", response_model=RestockingOrder, status_code=201)
+def create_restocking_order(request: CreateRestockingOrderRequest):
+    """Submit a restocking order built from the current recommendations for the given budget"""
+    recommendations = compute_restocking_recommendations(request.budget)
+    if not recommendations:
+        raise HTTPException(status_code=400, detail="No items can be recommended for this budget")
+
+    items = [
+        {
+            'sku': r['sku'],
+            'name': r['name'],
+            'warehouse': r['warehouse'],
+            'quantity': r['recommended_quantity'],
+            'unit_cost': r['unit_cost'],
+            'line_total': r['line_total']
+        }
+        for r in recommendations
+    ]
+    total_cost = round(sum(item['line_total'] for item in items), 2)
+    order_date = datetime.now()
+    expected_delivery = order_date + timedelta(days=RESTOCKING_LEAD_TIME_DAYS)
+
+    order = {
+        'id': f"RO-{len(restocking_orders) + 1:03d}",
+        'order_date': order_date.strftime('%Y-%m-%d'),
+        'budget': request.budget,
+        'items': items,
+        'total_cost': total_cost,
+        'lead_time_days': RESTOCKING_LEAD_TIME_DAYS,
+        'expected_delivery': expected_delivery.strftime('%Y-%m-%d'),
+        'status': 'Submitted'
+    }
+    restocking_orders.append(order)
+    return order
 
 if __name__ == "__main__":
     import uvicorn

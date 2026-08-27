@@ -4,6 +4,7 @@ export default {
     overview: '概要',
     inventory: '在庫',
     orders: '注文',
+    restocking: '補充',
     finance: '財務',
     demandForecast: '需要予測',
     companyName: '触媒コンポーネンツ',
@@ -126,6 +127,20 @@ export default {
       status: 'ステータス',
       expectedDelivery: '予定配達日',
       actualDelivery: '実際の配達日'
+    },
+    submittedOrders: {
+      title: '提出済み補充注文',
+      noOrders: 'まだ補充注文は提出されていません。',
+      leadTimeDays: '{days}日',
+      table: {
+        orderId: '注文ID',
+        items: '品目',
+        orderDate: '注文日',
+        leadTime: 'リードタイム',
+        expectedDelivery: '予定配達日',
+        totalCost: '合計費用',
+        status: 'ステータス'
+      }
     }
   },
 
@@ -188,6 +203,35 @@ export default {
     }
   },
 
+  // Restocking
+  restocking: {
+    title: '補充',
+    description: '予算に基づいた補充推奨を生成し、発注を行います',
+    budgetLabel: '予算',
+    recommendedItems: '推奨品目',
+    noRecommendations: 'この予算では補充できる品目がありません。予算を増やしてください。',
+    totalCost: '推奨合計費用',
+    remainingBudget: '残り予算',
+    placeOrder: '発注する',
+    placingOrder: '発注中...',
+    orderSuccess: '注文{orderId}が{count}件の品目、合計{total}で正常に発注されました。注文タブに表示されます。',
+    orderError: '補充注文の発注に失敗しました。もう一度お試しください。',
+    loadError: '補充推奨の読み込みに失敗しました',
+    table: {
+      sku: 'SKU',
+      itemName: '品目名',
+      category: 'カテゴリ',
+      warehouse: '倉庫',
+      currentStock: '現在庫',
+      reorderPoint: '再注文点',
+      shortage: '不足',
+      trend: 'トレンド',
+      unitCost: '単価',
+      quantity: '数量',
+      lineTotal: '小計'
+    }
+  },
+
   // Filters
   filters: {
     timePeriod: '期間',
@@ -206,7 +250,8 @@ export default {
     backordered: 'バックオーダー',
     inStock: '在庫あり',
     lowStock: '在庫僅少',
-    adequate: '適量'
+    adequate: '適量',
+    submitted: '提出済み'
   },
 
   // Trends
