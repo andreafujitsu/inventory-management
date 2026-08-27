@@ -53,3 +53,6 @@ logs/
 
 # Environment variables
 .env
+
+# Claude Code local settings (personal permission/MCP overrides, not for sharing)
+.claude/settings.local.json
