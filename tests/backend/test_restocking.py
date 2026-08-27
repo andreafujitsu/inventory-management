@@ -4,6 +4,8 @@ Tests for restocking API endpoints.
 import pytest
 from datetime import datetime
 
+import mock_data
+
 
 class TestRestockingRecommendationsEndpoint:
     """Test suite for the restocking recommendations endpoint."""
@@ -170,3 +172,65 @@ class TestRestockingOrdersEndpoint:
         response = client.get("/api/restocking/orders")
         assert response.status_code == 200
         assert isinstance(response.json(), list)
+
+
+class TestRestockingEdgeCases:
+    """Test suite for malformed-data edge cases that previously crashed the recommendation engine."""
+
+    def test_zero_unit_cost_item_is_skipped_not_crashed(self, client):
+        """A shortage item with unit_cost 0 must not raise ZeroDivisionError, just be skipped."""
+        bad_item = {
+            'id': 'test-zero-cost',
+            'sku': 'TEST-ZERO-COST',
+            'name': 'Zero Cost Test Item',
+            'category': 'Test',
+            'warehouse': 'San Francisco',
+            'quantity_on_hand': 0,
+            'reorder_point': 100,
+            'unit_cost': 0,
+            'location': 'Test',
+            'last_updated': '2025-01-01T00:00:00'
+        }
+        mock_data.inventory_items.append(bad_item)
+        try:
+            response = client.get("/api/restocking/recommendations?budget=100000")
+            assert response.status_code == 200
+            skus = [item['sku'] for item in response.json()]
+            assert 'TEST-ZERO-COST' not in skus
+        finally:
+            mock_data.inventory_items.remove(bad_item)
+
+    def test_missing_trend_in_demand_forecast_does_not_crash(self, client):
+        """A demand forecast entry with a null trend must not raise AttributeError and should fall back to 'stable'."""
+        bad_item = {
+            'id': 'test-bad-trend',
+            'sku': 'TEST-BAD-TREND',
+            'name': 'Bad Trend Test Item',
+            'category': 'Test',
+            'warehouse': 'San Francisco',
+            'quantity_on_hand': 0,
+            'reorder_point': 100,
+            'unit_cost': 10.0,
+            'location': 'Test',
+            'last_updated': '2025-01-01T00:00:00'
+        }
+        bad_forecast = {
+            'id': 'test-forecast-bad-trend',
+            'item_sku': 'TEST-BAD-TREND',
+            'item_name': 'Bad Trend Test Item',
+            'current_demand': 10,
+            'forecasted_demand': 20,
+            'trend': None,
+            'period': 'Next 30 days'
+        }
+        mock_data.inventory_items.append(bad_item)
+        mock_data.demand_forecasts.append(bad_forecast)
+        try:
+            response = client.get("/api/restocking/recommendations?budget=100000")
+            assert response.status_code == 200
+            matching = [item for item in response.json() if item['sku'] == 'TEST-BAD-TREND']
+            assert len(matching) == 1
+            assert matching[0]['trend'] == 'stable'
+        finally:
+            mock_data.inventory_items.remove(bad_item)
+            mock_data.demand_forecasts.remove(bad_forecast)

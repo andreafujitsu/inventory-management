@@ -184,7 +184,8 @@ def compute_restocking_recommendations(budget: float) -> list:
             continue
 
         forecast = demand_by_sku.get(item['sku'])
-        trend = forecast['trend'].lower() if forecast else 'stable'
+        raw_trend = forecast.get('trend') if forecast else None
+        trend = raw_trend.lower() if isinstance(raw_trend, str) else 'stable'
         forecasted_demand = forecast['forecasted_demand'] if forecast else 0
         priority_score = shortage * DEMAND_TREND_WEIGHT.get(trend, 1.0)
 
@@ -208,6 +209,9 @@ def compute_restocking_recommendations(budget: float) -> list:
     remaining_budget = budget
     recommendations = []
     for candidate in candidates:
+        # A zero/negative cost can't be divided into the budget and shouldn't be recommended
+        if candidate['unit_cost'] <= 0:
+            continue
         if remaining_budget < candidate['unit_cost']:
             continue
 
